@@ -1,31 +1,30 @@
 //#include <stdlib.h>
 #include "Serial.h"
+#include <stdio.h>   /* Стандартные объявления ввода/вывода */
+#include <stdlib.h>
 
 int main(){
 
-    char* buf=(char*)malloc(150);
-    char* old=buf;
+    char buf[150];
     
-    int port=serial_begin(9600, mode_8N1);
-    int limit=123;
-    int count=0;
+    struct Serial* COM_port=serial_begin(SERIAL_DEVICE, 9600, mode_8N1);
+    int count;
     puts("start");
-    
+    int limit=20;
     while (limit>0)
     {
-    //    serial_flush();
-        count = serial_read( buf, 0);
-        serial_read( buf, count);
-        if(count){
-            buf=buf+count;
-            limit=limit-count;
+        count = serial_read(COM_port, buf, 150);
+        if(count)
+        {
+            printf(buf);
+            fwrite(buf,1,count,stdout);
+            printf("\n");
+            limit--;
+            serial_write(COM_port,"hello",sizeof("hello"));
         }
         
     }
-    printf("\n%s",old);
-    serial_close();
-
-    free(old);
+    serial_close(COM_port);
 
 }
 

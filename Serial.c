@@ -1,14 +1,26 @@
 #include "Serial.h"
+#include <stdio.h>   /* Стандартные объявления ввода/вывода */
+#include <stdlib.h>  /* Функции стандартной библиотеки  */
+#include <string.h>  /* Объявления строковых функций */
+#include <unistd.h>  /* Объявления стандартных функций UNIX */
+#include <fcntl.h>   /* Объявления управления файлами */
+#include <errno.h>   /* Объявления кодов ошибок */
+#include <termios.h> /* Объявления управления POSIX-терминалом */
 
-static uint32_t serial_FIFO=0;
-static int fd=0;
-static char buf[32]={0};
-static const char DEVISE[] ="/dev/ttyUSB0";
+#define c_new(t)     ((t*)malloc(sizeof(t)))
+#define c_new_n(t,n)     ((t*)malloc(sizeof(t)*n))
+
+// static uint32_t serial_FIFO=0;
+// static int fd=0;
+// static char buf[32]={0};
+// static const char DEVISE[] ="/dev/ttyUSB0";
+
 
 
 
 //-----------------------------------------------------------------
-void __set_speed(int speed,struct termios* options){
+
+static void __set_speed(int speed,struct termios* options){
     //-- Установка скорости передачи ...
             speed_t __speed=0;
             switch (speed)
@@ -109,19 +121,22 @@ void __set_speed(int speed,struct termios* options){
             cfsetispeed(options, __speed);
             cfsetospeed(options, __speed);
 }
+void serial_set_speed(struct Serial* serial,int speed){
+    __set_speed(speed, &(serial->options));
+}
 //-----------------------------------------------------------------
-__set_mode(enum serial_mode mode,struct termios* options)
+static void __set_mode(enum serial_mode mode,struct termios* options)
 {
     switch (mode)
             {
-            case 0:
+            case mode_8N1:
                 //    Отсутствие проверки на четность (8N1):
                 options->c_cflag &= ~PARENB;     /* no parity check */
                 options->c_cflag &= ~CSTOPB;     /* -__- */
                 options->c_cflag &= ~CSIZE;      /* Маскирование битов размера символов */
                 options->c_cflag |= CS8;         /* Установка 8 битов данных */
                 break;
-            case 1:
+            case mode_7E1:
                 //    Проверка на четность (7E1):
                 options->c_cflag |= PARENB;
                 options->c_cflag &= ~PARODD;
@@ -129,7 +144,7 @@ __set_mode(enum serial_mode mode,struct termios* options)
                 options->c_cflag &= ~CSIZE;
                 options->c_cflag |= CS7;
                 break;
-            case 2:
+            case mode_701:
                 //    Проверка на нечетность (7O1):
                 options->c_cflag |= PARENB;
                 options->c_cflag |= PARODD;
@@ -137,7 +152,7 @@ __set_mode(enum serial_mode mode,struct termios* options)
                 options->c_cflag &= ~CSIZE;
                 options->c_cflag |= CS7;
                 break;
-            case 3:
+            case mode_7S1:
                 //    Пробел (space parity) бита четности устанавливается также как и отсутствие проверки на четность (7S1):
                 options->c_cflag &= ~PARENB;
                 options->c_cflag &= ~CSTOPB;
@@ -151,95 +166,88 @@ __set_mode(enum serial_mode mode,struct termios* options)
 
 }
 //-----------------------------------------------------------------
-int serial_begin(int speed, enum serial_mode mode)
+struct Serial* serial_begin(const char* DEVISE,int speed, enum serial_mode mode)
 {
 
 
-    serial_FIFO = new_FIFO(100);
+    // serial_FIFO = new_FIFO(100);
+    struct Serial* hSerial=c_new(struct Serial);
+    hSerial->rx_buffer=init_queue(256);
  
-    fd = open( DEVISE, O_RDWR |    // read &FIFO_mgr.FIFOs[FIFO_mgr.n_FIFOs-1 write
+    hSerial->fd = open( DEVISE, O_RDWR |    // read &FIFO_mgr.FIFOs[FIFO_mgr.n_FIFOs-1 write
                             O_NOCTTY | //эта программа не хочет быть управляющим терминалом для этого порта.
                             O_NDELAY); //эта программа не заботится о состоянии сигнала DCD, т.е. что другой конец линии запущен
-    if (fd == -1)
+    if (hSerial->fd == -1)
     {
         perror("open_port: Unable to open /dev/ttyUSB0 - ");
-        printf("%i", fd);
+        printf("%i", hSerial->fd);
         fflush(stdout);
-        return -1;
+        return 0;
 
     } else {
 
         
 
-        fcntl(fd, F_SETFL, O_NONBLOCK);
-        struct termios options;
+        fcntl(hSerial->fd, F_SETFL, O_NONBLOCK);
+        // struct termios options;
 
         //-- Получение текущих опций для порта... 
-        tcgetattr(fd, &options);
+        tcgetattr(hSerial->fd, &(hSerial->options));
 
 
             
             
-            __set_speed(speed, &options);
+            __set_speed(speed, &(hSerial->options));
 
             
             // Разрешение приемника и установка локального режима...
-            options.c_cflag |= (CLOCAL | CREAD);
+            hSerial->options.c_cflag |= (CLOCAL | CREAD);
 
 
-            __set_mode(mode, &options);
+            __set_mode(mode, &(hSerial->options));
             
-           
-                                        /*   
-                                        Ich muss durch den Monsun
-                                        Hinter die Welt
-                                        Ans Ende der Zeit
-                                        Bis kein Regen mehr fällt
-                                        Gegen den Sturm
-                                        Am Abgrund entlang
-                                        Und wenn ich nich' mehr kann, denk' ich daran
-                                        Irgendwann laufen wir zusammen
-                                        Durch den Monsun...
-
-                                        Чёт на 2007 потянуло, скоро отпустит
-                                        */
-           
-
             // Выбор неканонического (Raw) ввода
-            options.c_iflag = IGNPAR;
-            options.c_oflag = 0;
-            options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
-            tcflush(fd, TCIFLUSH);
+            hSerial->options.c_iflag = IGNPAR;
+            hSerial->options.c_oflag = 0;
+            hSerial->options.c_lflag &= ~(ICANON | ECHO | ECHOE | ISIG);
+            tcflush(hSerial->fd, TCIFLUSH);
 
         // Установка новых опций для порта...
-        tcsetattr(fd, TCSANOW, &options);
+        tcsetattr(hSerial->fd, TCSANOW, &(hSerial->options));
 
     }
     
-    return (fd);
+    return hSerial;
 }
   
 //-----------------------------------------------------------------
-int serial_write(char* s, int _n)
+int serial_write(struct Serial* serial,char* s, int _n)
 {
-    int n = write(fd, s, _n);
+    int n = write(serial->fd, s, _n);
     if (n < 0)
-        fputs("writefailed!\n", stderr);
-    if (n==0) puts("nodata");
+        fputs("write_failed!\n", stderr);
+    if (n==0) puts("no_w_data");
     return n;
 }
 //-----------------------------------------------------------------
-void serial_flush()
+void serial_flush(struct Serial* serial)
 {
     
     int res = 1;
+    u8 buf;
     //--заполняем FIFO-BUFFER пока данные доступны
-    do{
+    while(res && !isfull_queue(serial->rx_buffer))
+    {
         sleep(0);
-        res = read(fd,buf,1);
-        if(res<0)break;
-        FIFO_write(buf, res, serial_FIFO);
-    }while(res);
+        res = read(serial->fd,&buf,1);
+        if(res<0)
+        {   
+            fputs("error! cannot read!",stderr);
+            return;
+        }
+        if (insert_queue(serial->rx_buffer, buf)) return;
+        // FIFO_write(buf, res, serial_FIFO);
+    }
 
     
 
@@ -248,16 +256,31 @@ void serial_flush()
 
 //-----------------------------------------------------------------
 //Предварительно нужно обновить данные от порта через serial_flush();
-int serial_read(void* data_buffer, uint8_t __n)
+int serial_read(struct Serial* serial,void* data_buffer, u8 __n)
 {
-    serial_flush();
-    return FIFO_read(data_buffer, __n, serial_FIFO);
+    serial_flush(serial);
+    int i=0;
+    int rv=serial->rx_buffer->count;
+    while((!isempty_queue(serial->rx_buffer))&&(i<__n) )
+    {
+        ((u8*)data_buffer)[i]=pop_queue(serial->rx_buffer);
+        i++;
+    }
+    return rv;
 
 }
+
+
 //-----------------------------------------------------------------
-void serial_close()
+void serial_close(struct Serial* serial)
 {
-    close(fd);
-    del_FIFO(serial_FIFO);
+    close(serial->fd);
+    free_queue(serial->rx_buffer);
+    free(serial);
+
 }
 //------------------------------------------------------------------
+
+#undef c_new   
+#undef c_new_n
+
