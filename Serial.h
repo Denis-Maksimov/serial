@@ -32,17 +32,22 @@ enum serial_mode{
 
 #define SERIAL_DEVICE "/dev/ttyUSB0"
 
-typedef struct 
+
+typedef struct Serial
 {
     int fd;
     struct termios options;
     struct timeval tv;
     // struct queue* rx_buffer;
     u8 rx_buffer[256];
-    void(*in_handler)(Serial* serial);      //обработчик событий ввода
-    void(*out_handler)(Serial* serial);     //обработчик событий вывода
-    int(*timeout_handler)(Serial* serial);    //обработчик таймаута раунда (if not 0 завершает сервер)
+    void(*in_handler)(struct Serial* serial);      //обработчик событий ввода
+    void(*out_handler)(struct Serial* serial);     //обработчик событий вывода
+    int(*timeout_handler)(struct Serial* serial);    //обработчик таймаута раунда (if not 0 завершает сервер)
 }Serial;
+
+typedef void(*serial_handler_t)(Serial* serial);
+typedef int(*serial_to_handler_t)(Serial* serial);
+
 
 SERIAL_API void serial_begin(Serial* hSerial, const char* DEVISE,int speed, enum serial_mode mode);
 SERIAL_API void serial_set_speed(Serial* serial,int speed);

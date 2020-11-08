@@ -169,7 +169,7 @@ void serial_begin(Serial* hSerial, const char* DEVISE,int speed, enum serial_mod
         perror("open_port: Unable to open /dev/ttyUSB0 - ");
         printf("%i", hSerial->fd);
         fflush(stdout);
-        return 0;
+        return;
 
     } else {
 
@@ -290,14 +290,14 @@ int serial_work(Serial* port)
 }
 
 //------------------------------------------------------------------
-void serial_set_in_handler(Serial* port,void(*in_handler)(int fd))
+void serial_set_in_handler(Serial* port, serial_handler_t in_handler)
 {
     port->in_handler=in_handler;
 }
-void serial_set_out_handler(Serial* port,void(*out_handler)(int fd)){
+void serial_set_out_handler(Serial* port, serial_handler_t out_handler){
     port->out_handler=out_handler;
 }
-void serial_set_timeout_handler(Serial* port,int(*timeout_handler)(void)){
+void serial_set_timeout_handler(Serial* port,serial_to_handler_t timeout_handler){
     port->timeout_handler=timeout_handler;
 }
 //------------------------------------------------------------------
@@ -309,7 +309,7 @@ void default_in_handler(Serial* serial)
     if(res<0)
     {   
         fputs("error! cannot read!",stderr);
-        return 0;
+        return ;
     }
 }      
 //обработчик событий вывода
