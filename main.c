@@ -1,30 +1,38 @@
 //#include <stdlib.h>
 #include "Serial.h"
-#include <stdio.h>   /* Стандартные объявления ввода/вывода */
-#include <stdlib.h>
+
+
+
+void recv_handler(Serial* serial)
+{
+    ssize_t res = read(serial->fd, serial->rx_buffer, 256);
+    if(res<0)
+    {   
+        fputs("error! cannot read!",stderr);
+        return ;
+    }
+    printf("Received data:\n%.*s\n *%ld*\n",(int)res, serial->rx_buffer,res);
+}
+
+void send_handler(Serial* serial)
+{
+
+}
+
+int periodic_to_handler(Serial* serial){
+    return 0;
+}
+
 
 int main(){
 
-    char buf[150];
-    
-    struct Serial* COM_port=serial_begin(SERIAL_DEVICE, 9600, mode_8N1);
-    int count;
+    Serial COM_port;
+    serial_begin(&COM_port, SERIAL_DEVICE, 9600, mode_8N1);
     puts("start");
-    int limit=20;
-    while (limit>0)
-    {
-        count = serial_read(COM_port, buf, 150);
-        if(count)
-        {
-            printf(buf);
-            fwrite(buf,1,count,stdout);
-            printf("\n");
-            limit--;
-            serial_write(COM_port,"hello",sizeof("hello"));
-        }
-        
-    }
-    serial_close(COM_port);
+    COM_port.in_handler=recv_handler;
+    serial_work(&COM_port);
+
+    serial_close(&COM_port);
 
 }
 

@@ -2,15 +2,16 @@
 #define SERIAL_H
 
 
-// #include <stdio.h>   /* Стандартные объявления ввода/вывода */
-// #include <string.h>  /* Объявления строковых функций */
-// #include <unistd.h>  /* Объявления стандартных функций UNIX */
-// #include <fcntl.h>   /* Объявления управления файлами */
-// #include <errno.h>   /* Объявления кодов ошибок */
+#include <stdio.h>   /* Стандартные объявления ввода/вывода */
+#include <stdlib.h>  /* Функции стандартной библиотеки  */
+#include <string.h>  /* Объявления строковых функций */
+#include <unistd.h>  /* Объявления стандартных функций UNIX */
+#include <fcntl.h>   /* Объявления управления файлами */
+#include <errno.h>   /* Объявления кодов ошибок */
 #include <termios.h> /* Объявления управления POSIX-терминалом */
-// #include "FIFO.h"
-#include "queue.h"
 
+#include <sys/select.h>
+#include <stdint.h>
 #include <stddef.h>    
 
 #define SERIAL_API      extern
@@ -31,20 +32,30 @@ enum serial_mode{
 
 #define SERIAL_DEVICE "/dev/ttyUSB0"
 
-struct Serial
+
+typedef struct Serial
 {
     int fd;
     struct termios options;
-    struct queue* rx_buffer;
-};
+    struct timeval tv;
+    // struct queue* rx_buffer;
+    u8 rx_buffer[256];
+    void(*in_handler)(struct Serial* serial);      //обработчик событий ввода
+    void(*out_handler)(struct Serial* serial);     //обработчик событий вывода
+    int(*timeout_handler)(struct Serial* serial);    //обработчик таймаута раунда (if not 0 завершает сервер)
+}Serial;
 
-SERIAL_API struct Serial* serial_begin(const char* DEVISE,int speed, enum serial_mode mode);
-
-SERIAL_API int serial_write(struct Serial* port, char* s, int _n);
-SERIAL_API void serial_flush(struct Serial* serial);
-SERIAL_API int serial_read(struct Serial* serial,void* data_buffer, u8 __n);
-SERIAL_API void serial_close(struct Serial* serial);
+typedef void(*serial_handler_t)(Serial* serial);
+typedef int(*serial_to_handler_t)(Serial* serial);
 
 
+SERIAL_API void serial_begin(Serial* hSerial, const char* DEVISE,int speed, enum serial_mode mode);
+SERIAL_API void serial_set_speed(Serial* serial,int speed);
+SERIAL_API int serial_write(Serial* port, char* s, int _n);
+SERIAL_API ssize_t serial_read(Serial* serial,void* data_buffer, u8 __n);
+SERIAL_API void serial_close(Serial* serial);
+SERIAL_API void serial_set_period_to(Serial* serial,__time_t seconds, __suseconds_t useconds);
+SERIAL_API void serial_set_default_handlers(Serial* serial);
 
+SERIAL_API int serial_work(Serial* port);
 #endif // !SERIAL_H

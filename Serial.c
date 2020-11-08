@@ -1,21 +1,7 @@
 #include "Serial.h"
-#include <stdio.h>   /* Стандартные объявления ввода/вывода */
-#include <stdlib.h>  /* Функции стандартной библиотеки  */
-#include <string.h>  /* Объявления строковых функций */
-#include <unistd.h>  /* Объявления стандартных функций UNIX */
-#include <fcntl.h>   /* Объявления управления файлами */
-#include <errno.h>   /* Объявления кодов ошибок */
-#include <termios.h> /* Объявления управления POSIX-терминалом */
 
 #define c_new(t)     ((t*)malloc(sizeof(t)))
 #define c_new_n(t,n)     ((t*)malloc(sizeof(t)*n))
-
-// static uint32_t serial_FIFO=0;
-// static int fd=0;
-// static char buf[32]={0};
-// static const char DEVISE[] ="/dev/ttyUSB0";
-
-
 
 
 //-----------------------------------------------------------------
@@ -121,7 +107,8 @@ static void __set_speed(int speed,struct termios* options){
             cfsetispeed(options, __speed);
             cfsetospeed(options, __speed);
 }
-void serial_set_speed(struct Serial* serial,int speed){
+void serial_set_speed(Serial* serial,int speed)
+{
     __set_speed(speed, &(serial->options));
 }
 //-----------------------------------------------------------------
@@ -166,13 +153,13 @@ static void __set_mode(enum serial_mode mode,struct termios* options)
 
 }
 //-----------------------------------------------------------------
-struct Serial* serial_begin(const char* DEVISE,int speed, enum serial_mode mode)
+void serial_begin(Serial* hSerial, const char* DEVISE,int speed, enum serial_mode mode)
 {
 
 
     // serial_FIFO = new_FIFO(100);
-    struct Serial* hSerial=c_new(struct Serial);
-    hSerial->rx_buffer=init_queue(256);
+
+    // hSerial->rx_buffer=init_queue(256);
  
     hSerial->fd = open( DEVISE, O_RDWR |    // read &FIFO_mgr.FIFOs[FIFO_mgr.n_FIFOs-1 write
                             O_NOCTTY | //эта программа не хочет быть управляющим терминалом для этого порта.
@@ -182,14 +169,13 @@ struct Serial* serial_begin(const char* DEVISE,int speed, enum serial_mode mode)
         perror("open_port: Unable to open /dev/ttyUSB0 - ");
         printf("%i", hSerial->fd);
         fflush(stdout);
-        return 0;
+        return;
 
     } else {
 
         
 
-        fcntl(hSerial->fd, F_SETFL, O_NONBLOCK);
-        // struct termios options;
+        // fcntl(hSerial->fd, F_SETFL, O_NONBLOCK);
 
         //-- Получение текущих опций для порта... 
         tcgetattr(hSerial->fd, &(hSerial->options));
@@ -216,12 +202,13 @@ struct Serial* serial_begin(const char* DEVISE,int speed, enum serial_mode mode)
         tcsetattr(hSerial->fd, TCSANOW, &(hSerial->options));
 
     }
-    
-    return hSerial;
+    serial_set_period_to(hSerial, 1, 0);
+    serial_set_default_handlers(hSerial);
+    return;
 }
   
 //-----------------------------------------------------------------
-int serial_write(struct Serial* serial,char* s, int _n)
+int serial_write(Serial* serial,char* s, int _n)
 {
     int n = write(serial->fd, s, _n);
     if (n < 0)
@@ -230,53 +217,132 @@ int serial_write(struct Serial* serial,char* s, int _n)
     return n;
 }
 //-----------------------------------------------------------------
-void serial_flush(struct Serial* serial)
+ssize_t serial_read(Serial* serial,void* data_buffer, u8 __n)
 {
-    
-    int res = 1;
-    u8 buf;
-    //--заполняем FIFO-BUFFER пока данные доступны
-    while(res && !isfull_queue(serial->rx_buffer))
-    {
-        sleep(0);
-        res = read(serial->fd,&buf,1);
-        if(res<0)
-        {   
-            fputs("error! cannot read!",stderr);
-            return;
-        }
-        if (insert_queue(serial->rx_buffer, buf)) return;
-        // FIFO_write(buf, res, serial_FIFO);
+     
+    ssize_t res = read(serial->fd, data_buffer, 1024);
+    if(res<0)
+    {   
+        fputs("error! cannot read!",stderr);
+        return 0;
     }
+
+    return res;
 
     
 
 }
 
-
-//-----------------------------------------------------------------
-//Предварительно нужно обновить данные от порта через serial_flush();
-int serial_read(struct Serial* serial,void* data_buffer, u8 __n)
+//------------------------------------------------------------------
+int serial_work(Serial* port)
 {
-    serial_flush(serial);
-    int i=0;
-    int rv=serial->rx_buffer->count;
-    while((!isempty_queue(serial->rx_buffer))&&(i<__n) )
-    {
-        ((u8*)data_buffer)[i]=pop_queue(serial->rx_buffer);
-        i++;
-    }
-    return rv;
 
+    fd_set fd_in,fd_out;
+    struct timeval tv;
+
+    // u_socket_t largest_sock=port->io.in;
+    while(1){  
+
+        //занулить
+        FD_ZERO( &fd_in );
+        FD_ZERO( &fd_out );
+
+
+        FD_SET( port->fd, &fd_in );//добавляем в сет
+        FD_SET( port->fd, &fd_out );//добавляем в сет
+
+        tv.tv_sec = port->tv.tv_sec;
+        tv.tv_usec = port->tv.tv_usec;
+  
+        int largest_sock=port->fd;
+        
+        int ret = select( largest_sock + 1, &fd_in, &fd_out, NULL, &tv );
+        // проверяем успешность вызова
+        if ( ret == -1 )
+        {
+            printf("SELECT_ERROR!!\n");
+            return -1;  
+
+        }else if( ret == 0 )
+        {
+            // Событий за таймаут не произошло
+            if(port->timeout_handler(port)) return 0;
+
+        }else{
+            // обнаружили событие
+
+            if ( FD_ISSET( port->fd, &fd_in ) && port->fd==0 ){
+                // Событие входа
+                printf("new data\n");
+                port->in_handler(port);
+            }
+          
+            if ( FD_ISSET( port->fd, &fd_out )&& port->fd){
+                // Событие выхода
+                printf("end writing\n");
+                port->out_handler(port);
+            }            
+
+
+        }   
+
+    }
 }
 
+//------------------------------------------------------------------
+void serial_set_in_handler(Serial* port, serial_handler_t in_handler)
+{
+    port->in_handler=in_handler;
+}
+void serial_set_out_handler(Serial* port, serial_handler_t out_handler){
+    port->out_handler=out_handler;
+}
+void serial_set_timeout_handler(Serial* port,serial_to_handler_t timeout_handler){
+    port->timeout_handler=timeout_handler;
+}
+//------------------------------------------------------------------
+
+//обработчик событий ввода
+void default_in_handler(Serial* serial)
+{
+    ssize_t res = read(serial->fd, serial->rx_buffer, 256);
+    if(res<0)
+    {   
+        fputs("error! cannot read!",stderr);
+        return ;
+    }
+}      
+//обработчик событий вывода
+void default_out_handler(Serial* serial)
+{
+    puts("send ok");
+}
+//обработчик таймаута раунда (if not 0 завершает сервер)     
+int default_timeout_handler(Serial* serial)
+{
+    static int wath_duck=300;
+    wath_duck--;
+    printf("kra-kra!!! = *%d*seconds\n",wath_duck);
+    return !wath_duck;
+}  
+
+
+void serial_set_default_handlers(Serial* serial)
+{
+    serial->in_handler=default_in_handler;
+    serial->out_handler=default_out_handler;
+}
+
+void serial_set_period_to(Serial* serial,__time_t seconds, __suseconds_t useconds)
+{
+    serial->tv.tv_sec=seconds;
+    serial->tv.tv_usec=useconds;
+}
 
 //-----------------------------------------------------------------
-void serial_close(struct Serial* serial)
+void serial_close(Serial* serial)
 {
     close(serial->fd);
-    free_queue(serial->rx_buffer);
-    free(serial);
 
 }
 //------------------------------------------------------------------
